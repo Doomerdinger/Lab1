@@ -1,0 +1,555 @@
+package curve;
+
+import javax.swing.*;
+import java.awt.Color;
+import java.awt.Graphics;
+import java.awt.Dimension;
+import java.awt.Image;
+import java.awt.event.*;
+
+/** A JPanel for Displaying Bezier curves.  Allows for multiple
+ * curves and for mouse manipulation of the points.
+ */
+public class DisplayPanelB2F extends JPanel implements MouseListener, MouseMotionListener {
+    /**
+     * State in which the new point will be inserted before the active point
+     */
+    protected final static int INSERT_BEFORE = 1413;
+    /**
+     * State in which new points will be inserted after the current point
+     */
+    protected  final static int INSERT_AFTER = 1414;
+    /**
+     * State in which the active point is being moved
+     */
+    protected  final static int MOVE = 1416;
+    
+    /**
+     * Rotation constant for 3D applets.
+     */
+    public final static int ROTATE_UP=1;
+    /**
+     * @see #ROTATE_UP
+     */
+    public final static int ROTATE_DOWN=2;
+    /**
+     * @see #ROTATE_UP
+     */
+    public final static int ROTATE_LEFT=3;
+    /**
+     * @see #ROTATE_UP
+     */
+    public final static int ROTATE_RIGHT=4;
+    
+    /* Used for 3D applets
+     * activePanel states. For the first click, the state is set to ready.
+     * after that, the addPoints and such buttons are active (second click)
+     */
+    public static final int ROTATING = 11; //first click
+    public static final int RESPONDING = 12; //subsequent clicks
+    public static final int NOT_READY = 13; // the mouse is not in the panel
+    
+    /** Determine whether or not the applet is in the process of
+     * relocating a point.
+     */
+    protected  boolean moveState;
+    /** Reference to parent applet. Used for interpanel communication.
+     */
+    protected  CApplet parent = null;
+    /** The curve currently being displayed.
+     */
+    protected  Curve current = null;
+    /** The canvas on which the curve is drawn.
+     */
+    protected  MyCanvas theCanvas = null;
+    /** The offscreen buffered image object that allows for quick/easy redrawing of this panel.
+     */
+    protected Image theImage = null;
+    /** Offscreen buffered image to store background images on, such as inactive curves.
+     */
+    protected Image theBackground = null;
+    /** Graphics descriptor for theImage, to be used to draw to offscreen image.
+     */
+    protected  Graphics gImage = null;
+    /** Graphics descriptor for theBackground. Used to draw to the background image.
+     */
+    protected  Graphics gBackground = null;
+    /** Current operating mode (INSERT_BEFORE, INSERT_AFTER, MOVE)
+     */
+    protected  int curMode = -1;
+    protected  int startX = 0;
+    protected  int startY = 0;
+    
+    /** Whether or not a point is selected for manipulation
+     */
+    protected boolean pointSelected = false;
+    
+    protected  boolean drawingCurve = false;
+    protected  int xLimit = 100;
+    protected  int yLimit = 100;
+    
+    /**
+     * Creates a new DisplayPanel, and make sure the current insertion
+     * mode is 'after'
+     */
+    public DisplayPanelB2F() {
+        super();
+        curMode = INSERT_AFTER;
+    }
+    
+    public int getWidth()
+    {
+    	if(super.getWidth() == 0)
+    		return 200;
+		return super.getWidth();
+    }
+    
+    public int getHeight()
+    {
+    	if(super.getHeight() == 0)
+    		return 200;
+    	return super.getHeight();
+    }
+    
+    /**
+     * Set up the display panel before any real drawing is done.
+     */
+    public void init() {
+        moveState = false;
+        
+        // Offscreen images
+    	theImage = createImage(getWidth(), getHeight());
+    	theBackground = createImage(getWidth(), getHeight());
+        
+        // Canvas initialization
+        theCanvas = new MyCanvas(theImage);
+        theCanvas.setBackground(Color.WHITE);
+        theCanvas.setSize(getWidth(), getHeight());
+        
+        addListeners();
+        
+        // Sets up graphics descriptors for offscreen images
+        gImage = theImage.getGraphics();
+        gBackground = theBackground.getGraphics();
+        
+        add(theCanvas);
+        
+        // Clear both offscreen images
+        gImage.setColor(Color.WHITE) ;
+        gImage.fillRect(0, 0, getWidth(), getHeight());
+        gBackground.setColor(Color.WHITE);
+        gBackground.fillRect(0, 0, getWidth(), getHeight());
+        
+        repaint();
+    }
+    
+    /**
+     * 3D Applets do not use the DisplayPanel as their listener, but instead
+     * use the CApplet
+     */
+    protected void addListeners(){
+        theCanvas.addMouseListener(this);
+        theCanvas.addMouseMotionListener(this);
+    }
+    
+    /**
+     * Set the current panel drawing mode.  State should be one
+     * of the static constants (available in this class)
+     * INSERT_BEFORE, INSERT_AFTER, or MOVE.
+     * 
+     * @param mode The new mode
+     */
+    public void setMode(int mode) {
+        curMode = mode;
+    }
+    
+    /**
+     * Set the parent CApplet.  All events dealing with more than
+     * this panel must be processed through CApplet.
+     * 
+     * @param c The new parent CApplet.
+     */
+    public void setParent(CApplet c) {
+        parent = c;
+    }
+    
+    /**
+     * Draws the curve onto the display.
+     * 
+     * @param c The curve to be drawn.
+     */
+    public void drawCurve(Curve c) {
+	current = c;
+        
+        //set the coordinates of the current controlPoint
+        try{
+            CurveManipulatePanelB2F cmp = parent.getCurveManipulatePanel();
+            cmp.setControlPoint(current.getPoint(current.getCurrentIndex()));
+        } catch (Exception e) {}
+        
+        
+        gImage.setColor(Color.WHITE);
+        gImage.fillRect(0, 0, getWidth(), getHeight());
+        drawGridLines();
+        
+        CurvatureGraphPanel cgp = null;
+        try{
+            cgp = parent.getCurvatureGraphPanel();
+            Graphics g = cgp.getG();
+            g.setColor(Color.WHITE);
+            g.fillRect(0, 0, cgp.getWidth(), cgp.getHeight());
+        } catch (Exception e){}        
+        
+        gImage.drawImage(theBackground, 0, 0, this);
+        curve.Point p = null;
+        try {
+            p = current.getPosition((float)parent.getCurveManipulatePanel().getT());
+        } catch(Exception e) { }
+        
+        if(c != null && p != null && c.getDrawable()) {
+            gImage.setColor(Color.MAGENTA);
+            gImage.fillOval((int)p.x - 5, (int)p.y - 5, 10, 10);
+        }
+
+        try{
+            cgp = parent.getCurvatureGraphPanel();
+            Graphics g = cgp.getG();
+            if(parent.getDrawCurvatureGraph()){
+                c.drawCurvature((float)parent.getCurveManipulatePanel().getT(), g, cgp.getWidth(), cgp.getHeight());
+            }else {
+                g.setColor(getBackground());
+                g.fillRect(0, 0, cgp.getWidth(), cgp.getHeight());
+            }
+        } catch(Exception e) { }
+        
+        if(c != null && c.getDrawable()) {
+            try {
+                c.draw(gImage, true);
+                try {
+                    c.drawExtended((float)parent.getCurveManipulatePanel().getT(),
+                    gImage, true, true, true, true);
+                } catch (Exception e) { }
+                cgp = parent.getCurvatureGraphPanel();
+                Graphics g = cgp.getG();
+            } catch(Exception e) { }
+        }
+        try {
+            parent.getCurveManipulatePanel().setPoint(c.getPosition((float)parent.getCurveManipulatePanel().getT()));
+        }
+        catch(Exception e) {}
+        
+        theCanvas.repaint();
+        try{
+            cgp = parent.getCurvatureGraphPanel();
+            Graphics g = cgp.getG();
+            if(parent.getDrawCurvatureGraph())
+                parent.getCurvatureGraphPanel().getCanvas().repaint();
+        } catch(Exception e) { }
+        
+        parent.updateSlider();
+    }
+    
+    /**
+     * Clears the display background.
+     */
+    public void clearBackground() {
+        gBackground.setColor(Color.WHITE);
+        gBackground.fillRect(0, 0, getWidth(), getHeight());
+    }
+    
+    /**
+     * Draws grid lines onto the background offscreen image.
+     */
+    public void drawGridLines() {
+        int h = theCanvas.getHeight();
+        int w = theCanvas.getWidth();
+        gBackground.setColor(new Color(220, 220, 220));
+        for(int i = 0; i < h; i+=50)
+            gBackground.drawLine(0, (h - i), w, (h - i));
+        
+        for(int i = 0; i < w; i+=50)
+            gBackground.drawLine(i, 0, i, h);
+    }
+    
+    /**
+     * Add curve to the 'background' area of the display panel.
+     * Used when a curve is deselected.
+     * 
+     * @param c The curve to be drawn in the background.
+     */
+    public void addCurveToBackground(Curve c) {
+        try { c.draw(gBackground, false); } catch(Exception e) { }
+    }
+    
+    /**
+     * Returns the MyCanvas object that the display panel is drawn on.
+     * 
+     * @return The Canvas that the curves are drawn on.
+     */
+    public MyCanvas getCanvas() {
+        return theCanvas;
+    }
+    
+    /**
+     * Handles some point manipulation functions,
+     * and adding of new points.
+     * 
+     * @param e Event representing the click,
+     */
+    public void mouseClicked(MouseEvent e) {
+	if(current == null)
+            return;
+	
+        if((e.getButton() == MouseEvent.BUTTON1 && !moveState)) {
+	    curve.Point p = new curve.Point(e.getX(), e.getY());
+            CurveManipulatePanelB2F cmp = null;
+            if(current.getDrawable()) {
+                if(curMode == INSERT_AFTER)
+                    current.addPointAfter(p);
+                else if(curMode == INSERT_BEFORE)
+                    current.addPointBefore(p);
+              
+               // the best fit curve applet needs to do some other stuff
+                if(parent.type == CurveManipulatePanelB2F.BEST_FIT_BEZIER ||
+                		parent.type == CurveManipulatePanelB2F.INTERPOLATE_BEZIER) {
+                	// set the t value of the point
+                	BestFitBezCurve curve = (BestFitBezCurve)current;
+                	parent.getCurveManipulatePanel().setCurrentPointT(curve.getPointT());
+                	parent.getCurveManipulatePanel().updateControlPointsText();
+                } 
+                 
+                current.setDrawable(true);
+                cmp = parent.getCurveManipulatePanel();
+                cmp.enableDelButton();
+                //cmp.setPoint(p);
+                cmp.disableUndo();
+                
+            } else {
+                current.movePoint((int)p.x, (int)p.y);
+                current.setDrawable(true);
+                cmp = parent.getCurveManipulatePanel();
+                curMode = INSERT_AFTER;
+                moveState = false;
+            }
+            drawCurve(current);
+        }
+        parent.getCurveManipulatePanel().flashOptionalPanels();
+    }
+    
+    /**
+     * Handles mouse presses in some point manipulation functions.
+     *
+     * @param e Event representing the mouse press
+     */
+    public void mousePressed(MouseEvent e) {
+        if(current == null) {
+            System.out.println("current curve is null");
+            return;
+        }
+        pointSelected = false;
+        if((!moveState && e.getButton() == MouseEvent.BUTTON3)
+        || (moveState && e.getButton() == MouseEvent.BUTTON1)) {
+            
+            startX = e.getX();
+            startY = e.getY();
+            curve.Point curPt;
+            int dX, dY, curDist, bestDist, bestPt;
+            bestPt = -1;
+            bestDist = 200;
+            curDist = 200;
+            for(int i = 0; i < current.length(); i++) {
+                curPt = current.getPoint(i);
+                dX = Math.abs(startX - (int)curPt.x);
+                dY = Math.abs(startY - (int)curPt.y);
+                curDist = Math.max(dX, dY);
+                if(curDist < bestDist) {
+                    bestDist = curDist;
+                    bestPt = i;
+                }
+            }
+            if(bestDist < 5) {
+                pointSelected = true;
+                current.setActivePoint(bestPt);
+                
+                // the best fit curve applet needs to do some other stuff
+                if(parent.type == CurveManipulatePanelB2F.BEST_FIT_BEZIER ||
+                		parent.type == CurveManipulatePanelB2F.INTERPOLATE_BEZIER) {
+                	// set the t value of the point
+                	BestFitBezCurve curve = (BestFitBezCurve)current;
+                	parent.getCurveManipulatePanel().setCurrentPointT(curve.getPointT());
+                	parent.getCurveManipulatePanel().updateControlPointsText();
+                }
+                
+                parent.getCurveManipulatePanel().setPoint(current.getPoint(bestPt));
+                drawCurve(current);
+            }
+        }
+        parent.getCurveManipulatePanel().flashOptionalPanels();
+    }
+    
+    /**
+     * Handles the mouse release, as in some point manipulation functions.
+     * 
+     * @param e Event representing the release.
+     */
+    public void mouseReleased(MouseEvent e) {
+        if(current == null)
+            return;
+        if(pointSelected && ((!moveState && e.getButton() == MouseEvent.BUTTON3)
+        || moveState && e.getButton() == MouseEvent.BUTTON1) && (e.getX() != startX || e.getY() != startY)) {
+            
+            if(!inBounds(e.getX(), e.getY())){
+                int x = e.getX();
+                int y = e.getY();
+                if(x < 0)
+                    x = 0;
+                if(x > xLimit)
+                    x = xLimit;
+                if(y < 0)
+                    y = 0;
+                if(y > yLimit)
+                    y = yLimit;
+                current.movePoint(x, y);
+                parent.getCurveManipulatePanel().setPoint(new Point(x, y));
+                
+            } else {
+                current.movePoint(e.getX(), e.getY());
+                parent.getCurveManipulatePanel().setPoint(new Point(e.getX(), e.getY()));
+            }
+            drawCurve(current);
+        }
+        parent.getCurveManipulatePanel().flashOptionalPanels();
+    }
+    
+    /**
+     * Handles the mouse dragging (when moving a point around).
+     * 
+     * @param e Event representing the drag.
+     */
+    public void mouseDragged(MouseEvent e) {
+        if(current == null)
+            return;
+        if(pointSelected && !drawingCurve) {
+            if(!inBounds(e.getX(), e.getY())){
+            	System.out.println("X: " + e.getX() + " Y: " + e.getY());
+                int x = e.getX();
+                int y = e.getY();
+                if(x < 0)
+                    x = 0;
+                if(x > xLimit)
+                    x = xLimit;
+                if(y < 0)
+                    y = 0;
+                if(y > yLimit)
+                    y = yLimit;
+                current.movePoint(x, y);
+                parent.getCurveManipulatePanel().setControlPoint(new Point(x, y));
+            }
+            else{
+                current.movePoint(e.getX(), e.getY());
+                parent.getCurveManipulatePanel().setControlPoint(new Point(e.getX(), e.getY()));
+            }
+            drawingCurve = true;
+            drawCurve(current);
+            drawingCurve = false;
+        }
+        parent.getCurveManipulatePanel().flashOptionalPanels();
+    }
+    
+    /**
+     * Required MouseListener method  Not used (yet).
+     *
+     * @param e Event representing the mouse entering.
+     */
+    public void mouseEntered(MouseEvent e) { }
+    /**
+     * Required MouseListener method.  Not used (yet).
+     *
+     * @param e Event representing the mouse exiting.
+     */
+    public void mouseExited(MouseEvent e) { }
+    /**
+     * Required MouseListener method.  Not used (yet)
+     *
+     * @param e Event representing the mouse moving on the panel.
+     */
+    public void mouseMoved(MouseEvent e) { }
+    
+    /**
+     * Sets the point movement state for the applet - whether
+     * or not points may be moved.
+     * 
+     * @param b The new movement state.
+     */
+    public void setMove(boolean b){
+        moveState = b;
+    }
+    
+    /**
+     * Returns if the point (x, y) is within the bounds that are set by setLimits(int, int)
+     * 
+     * @param x x bound
+     * @param y y bound
+     * @return Returns if (x, y) is within the set bounds
+     */
+    protected  boolean inBounds(int x, int y){
+        if(x < 0 || x > xLimit || y < 0 || y > yLimit)
+            return false;
+        else
+            return true;
+    }
+    
+    /**
+     * Set the limits of the box for mouse dragging purposes -
+     * should be just slightly smaller than the size.  Controls
+     * the position of the point should the user attempt to drag a
+     * point outside the display panel.
+     * 
+     * @param x Width of the limits
+     * @param y Height of the limits
+     */
+    public void setLimits(int x, int y){
+        xLimit = x;
+        yLimit = y;
+    }
+    
+    /**
+     * Called in the CApplet's reset function, this clears the screen. In
+     * later versions of this panel, it can also recenter the view and perform
+     * any other necessary "reset" commands so that the applet returns to its
+     * starting state.
+     */
+    public void reset(){
+        moveState = false;
+        clearBackground();
+        drawGridLines();
+    }
+    
+    //////////// Required for A4DisplayPanel ///////////////////////////////
+    
+    public Graphics getBackgroundG(){
+        return gBackground;
+    }
+    
+    //////////////////// Required for S1DisplayPanel ///////////////////////////////
+    
+    public int getMode(){
+        return curMode;
+    }
+    
+
+	/**
+	 * Provides the graphics object for the current foreground image.
+	 */
+    public Graphics getImageGraphics() {
+	return gImage;
+    }
+
+	/**
+	 * Provides the canvas object for the current display.
+	 */
+    public MyCanvas getMyCanvas() {
+	return theCanvas;
+    }
+
+}
